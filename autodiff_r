@@ -1,0 +1,148 @@
+library(pacman)
+pacman::p_load(tidyverse,magrittr,flexsurv,dplyr,tidyr,tidyverse,data.table,plyr,TMB)
+
+# Set seed
+set.seed(341057598)
+
+# Number of subjects
+N <- 1000
+
+# Unconditional true parameters  
+alpha0.true <- -4
+alpha1.true <- alpha1 <- 1
+beta0.true <- 8
+beta1.true <- 1
+gamma.true <- 1.5
+lambda1.true <- 0 #lambda_{2,3} fixed
+lambda2.true <- 1
+lambda3.true <- 1
+#lambda4.true <- 0.5
+#lambda5.true <- 0.5
+delta.true <- 0.5
+kappa.true <- sqrt(0.5)
+sigmaA.true <- 1 
+sigmaB.true <- 1
+
+
+# Replicates
+# These can eventually be used to create repeated measures
+mean.repl <- 10 #changed from 4   (cluster size)
+replicates <- rpois(N,mean.repl) + 3
+idK <- sort(rep(1:N, replicates))
+
+Ntotal <-   sum(replicates)
+
+
+X0 <- rbinom(Ntotal, 1, 0.5) #cluster level
+X <- X0 #[idK] #longitudinal
+Z0 <- rbinom(N, 1, 0.5) 
+Z <- Z0[idK] #longtiduinal Z
+
+
+# Random effects
+a<-rnorm(N,0,sigmaA.true)
+b<-rnorm(N,0,sigmaB.true)
+a_All <- a[idK]
+b_All <- b[idK]
+
+
+# Conditional true parameters   
+eta.true <- alpha0.true+alpha1.true*X+a_All
+mu.true <- beta0.true + beta1.true*X + lambda1.true*a_All + b_All
+sigmaiij2.true <- exp(X*delta.true)
+
+# Prepare a data frame with identifiers and covariates
+df <- data.frame(Identifier=idK,X= X[idK], Z=Z[idK])  
+df$YNoZero  <-  rbinom(Ntotal, 1, 1/(1+exp(-eta.true)))
+df$cost <- rgamma(Ntotal,shape=kappa.true^(-2) , scale=0.5*exp(mu.true))
+#df$cost <- rgamma(Ntotal,shape=mu.true^2/ sigmaiij2.true , scale=sigmaiij2.true/mu.true )
+df <- df %>% mutate(cost2 =  cost*YNoZero ) 
+
+
+l0  <- 2   # hazard is assumed to be exponential 
+U  <- runif(N, 0,1)[idK]
+survt <- (-log(U)/(l0*exp(Z*gamma.true+lambda2.true*a_All+lambda3.true*b_All)))
+#survt <- (-log(U)/(l0*exp(Z*gamma.true+lambda2.true*a_All)))
+
+# censoring times:
+survt.censor <- rexp(N, rate= 2)[idK]
+# censoring:
+di    <- as.numeric(survt <= survt.censor);
+survt <- pmin(survt, survt.censor)  #survt is the minimum of survival time and censoring time
+df$survt <- survt
+df$di <- di
+
+df$X <- X
+df$Z <- Z
+
+df$a <- a_All
+df$b <- b_All
+
+qq <-10
+Q.partition <- c(0,quantile(survt,1:qq/qq))
+theta.names <- c("alpha0","alpha1","beta0","beta1","gamma","delta","kappa","lambda1","lambda2","lambda3","sigmaA","sigmaB",
+                 paste0("h",1:(length(Q.partition)-1)))
+theta <- rep(1,length(theta.names)) %>% set_names(theta.names) #starting values for use in optim
+theta["kappa"] <- 0.1
+
+# change the format of data  (long to wide)
+
+list1<-list()
+for(i in 1:N){
+  list1[[i]]<-1:replicates[i]
+}
+numbers<-unlist(list1)
+
+setDT(df)
+df.wide <- dcast(df, Identifier~numbers, value.var = c("cost2","X","Z","survt","di","a","b"))
+df.wide$replicates <- replicates
+
+maxrep<-max(replicates)+1
+dfcost<-as.matrix(df.wide[,2:maxrep])
+
+#a1 <- as.matrix(df.wide[,c(paste("a_", 1:9, sep=""))])
+#b1 <- as.matrix(df.wide[,c(paste("b_", 1:9, sep=""))])
+
+survt1<-df.wide$survt_1
+di1<-df.wide$di_1
+
+
+#sum of repeated costs & indicator variable to use for ellB
+costindsum<-list()
+costsum<-list()
+for(i in 1:N){
+  costindsum[[i]] <- sum(dfcost[i,][1:replicates[i]] > 0)
+  costsum[[i]] <- sum(dfcost[i,][1:replicates[i]] )
+}
+costindexsum<-unlist(costindsum)
+costsum<-unlist(costsum)
+
+df.wide$costindexsum<-costindexsum
+df.wide$costsum<-costsum
+
+## This was incorrect- numbers were off
+ncoldf <-ncol(df.wide)
+nXcol <- (1:ncoldf)[colnames(df.wide) %in% paste('X', 1:maxrep, sep='_')]
+X.row<-as.matrix(df.wide[,nXcol , with = FALSE])
+
+
+compile("autodiffr.cpp")
+dyn.load(dynlib("autodiffr"))
+
+index_vec<-sapply(1:N, function(v) min((1:length(Q.partition)-2)[survt1[v]<=Q.partition]))
+(1:length(Q.partition))[survt1[1]<=Q.partition]
+
+cumhaz_int <- c(Q.partition[2],(Q.partition[3:(qq+1)]-Q.partition[(2):(qq)]))
+
+maxrep_tmb <- max(replicates)
+
+#data and parameters to transfer to TMB using MakeADFun function
+data <- list(Xrow=X.row, Z0=Z0, N=N, Qpartition = Q.partition, replicates= replicates, dfcost=dfcost, survt1=survt1, di1=di1, costindexsum=costindexsum, costsum=costsum,cumhaz_int=cumhaz_int,index_vec=index_vec,maxrep=maxrep_tmb)
+
+parameters <- list(a1=rep(0,N), b1=rep(0,N),logsigma_a=0, logsigma_b=0, alpha0=1, alpha1=1, beta0=1, beta1=1, gamma=1, lambda1=1, lambda2=1, lambda3=1, kappa=1, delta=1,h1=1, h2=1, h3=1,h4=1,h5=1,h6=1,h7=1,h8=1,h9=1,h10=1)
+
+obj <- MakeADFun(data,parameters,random=c("a1","b1"),DLL="autodiffr")
+obj$hessian <- TRUE
+
+opt<-do.call("optim",obj)
+opt$par
