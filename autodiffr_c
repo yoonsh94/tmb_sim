@@ -1,0 +1,146 @@
+#include <TMB.hpp>
+
+template <class Type>
+Type cumhaz(vector<Type> Qpartition, Type survt_1, Type h1, Type h2, Type h3, Type h4, Type h5, Type h6, Type h7, Type h8, Type h9, Type h10, vector<Type> cumhaz_int,
+            Type index){
+  
+  vector<Type> htilde(10);
+  htilde(0)=h1;
+  htilde(1)=h2;
+  htilde(2)=h3;
+  htilde(3)=h4;
+  htilde(4)=h5;
+  htilde(5)=h6;
+  htilde(6)=h7;
+  htilde(7)=h8;
+  htilde(8)=h9;
+  htilde(9)=h10;
+  vector<Type> H = cumhaz_int * htilde;
+  Type retval = 0;
+  if (index == 0){
+    retval = H(0);}
+  if (index == 1){
+    retval = H(0) + H(1);}
+  if (index == 2){
+    retval = H(0) + H(1) + H(2);}
+  
+  if (index == 3){
+    retval = H(0) + H(1) + H(2) + H(3);}
+  
+  if (index == 4){
+    retval = H(0) + H(1) + H(2) + H(3) + H(4);}
+  
+  if (index == 5){
+    retval = H(0) + H(1) + H(2) + H(3) + H(4) + H(5);}
+  
+  if (index == 6){
+    retval = H(0) + H(1) + H(2) + H(3) + H(4) + H(5) + H(6);}
+  
+  if (index == 7){
+    retval = H(0) + H(1) + H(2) + H(3) + H(4) + H(5) + H(6) + H(7);}
+  
+  if (index == 8){
+    retval = H(0) + H(1) + H(2) + H(3) + H(4) + H(5) + H(6) + H(7) + H(8);}
+  
+  if (index == 9){
+    retval = H(0) + H(1) + H(2) + H(3) + H(4) + H(5) + H(6) + H(7) + H(8) + H(9);}
+  
+  
+  return retval;}
+
+
+
+// Likelihood for the survival submodel
+template <class Type>
+Type llc(Type zeta1, Type h1, Type h2, Type h3, Type h4, Type h5, Type h6, Type h7, Type h8, Type h9, Type h10, Type survt_1, Type di_1, vector<Type> Qpartition, vector<Type> cumhaz_int,
+         Type index){
+  Type lik_c = 0;
+  Type basehaz = 0;
+  
+  if(survt_1 <= Qpartition(1)){
+    basehaz = h1;}
+  if(survt_1 > Qpartition(1) && survt_1 <= Qpartition(2)){
+    basehaz = h2;}
+  if(survt_1 > Qpartition(2) && survt_1 <= Qpartition(3)){
+    basehaz = h3;}
+  
+  if(survt_1 > Qpartition(3) && survt_1 <= Qpartition(4)){
+    basehaz = h4;}
+  if(survt_1 > Qpartition(4) && survt_1 <= Qpartition(5)){
+    basehaz = h5;}
+  
+  if(survt_1 > Qpartition(5) && survt_1 <= Qpartition(6)){
+    basehaz = h6;}
+  if(survt_1 > Qpartition(6) && survt_1 <= Qpartition(7)){
+    basehaz = h7;}
+  
+  if(survt_1 > Qpartition(7) && survt_1 <= Qpartition(8)){
+    basehaz = h8;}
+  
+  if(survt_1 > Qpartition(8) && survt_1 <= Qpartition(9)){
+    basehaz = h9;}
+  
+  if(survt_1 > Qpartition(9) && survt_1 <= Qpartition(10)){
+    basehaz = h10;}
+  
+  lik_c = di_1 * (log(basehaz) + zeta1) - cumhaz(Qpartition, survt_1, h1,h2,h3,h4,h5,h6,h7,h8,h9,h10,cumhaz_int,index) * exp(zeta1);
+  return lik_c;  } 
+
+
+// Joint likelihood  
+template<class Type>
+Type objective_function<Type>::operator() ()
+{ 
+  
+  /* Data */
+  DATA_VECTOR(a1);
+  DATA_VECTOR(b1);
+  DATA_VECTOR(Z0);
+  DATA_INTEGER(N);
+  DATA_VECTOR(Qpartition);
+  DATA_VECTOR(survt1);
+  DATA_VECTOR(di1);
+  DATA_VECTOR(cumhaz_int);
+  DATA_VECTOR(index_vec);
+  //DATA_VECTOR(weight);
+  /* Parameters */
+
+  PARAMETER(gamma);
+  PARAMETER(lambda2);
+  PARAMETER(lambda3);
+  PARAMETER(h1);
+  PARAMETER(h2);
+  PARAMETER(h3);
+  PARAMETER(h4);
+  PARAMETER(h5);
+  PARAMETER(h6);
+  PARAMETER(h7);
+  PARAMETER(h8);
+  PARAMETER(h9);
+  PARAMETER(h10);
+  
+  /* Joint likelihood */
+  
+  
+  
+  
+  Type jnll = Type(0.0);
+  
+
+  vector<Type> zeta = Z0*gamma + lambda2*a1 + lambda3*b1;
+  
+  //the joint negative log-likelihood
+  for(int i=0; i<N; i++){
+    
+
+    Type index = index_vec(i);
+    Type survt_1 = survt1(i); 
+    Type di_1 = di1(i);
+    Type zeta1 = zeta(i);
+    //Type weight1 = weight(i);
+    
+    jnll -= llc(zeta1,h1,h2,h3,h4,h5,h6,h7,h8,h9,h10,survt_1,di_1,Qpartition, cumhaz_int, index);
+  } 
+  return jnll;
+}
+
