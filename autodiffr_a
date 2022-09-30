@@ -1,0 +1,79 @@
+#include <TMB.hpp>
+
+template <class Type>
+Type lla(vector<Type> eta_row, vector<Type> dfcost_row, Type rep){
+  
+  vector<Type> pi_i = exp(eta_row)/(1+exp(eta_row));
+  Type l_a = 0;
+  for(int h=0; h<rep; h++){
+    if(dfcost_row(h) > 0){
+      l_a += log(pi_i(h));
+    }
+    if(dfcost_row(h) == 0){
+      l_a += log(1-pi_i(h));
+    }
+  }
+  return l_a;
+}  
+
+// Joint likelihood  
+template<class Type>
+Type objective_function<Type>::operator() ()
+{ 
+  
+  /* Data */
+  DATA_MATRIX(Xrow);
+  DATA_INTEGER(N);
+  DATA_VECTOR(replicates);
+  DATA_MATRIX(dfcost);
+  DATA_INTEGER(maxrep);
+  //DATA_VECTOR(weight);
+  /* Parameters */
+  
+  PARAMETER_VECTOR(a1); 
+  PARAMETER(logsigma_a);
+  PARAMETER(alpha0);
+  PARAMETER(alpha1);
+
+  
+  
+  /* Joint likelihood */
+  
+  
+  
+  
+  Type jnll = Type(0.0);
+  
+  jnll -= sum(dnorm(a1, Type(0), exp(logsigma_a), true));
+  
+  
+  
+  
+  
+  matrix<Type> eta(N,maxrep);
+  
+  for(int i=0; i<N; i++){
+    Type rep = replicates(i);
+    for(int j=0; j<rep; j++){
+      eta(i,j) = Xrow(i,j)*alpha1 + alpha0 + a1(i);
+  
+    }
+    
+  }  
+  
+  
+
+  //the joint negative log-likelihood
+  for(int i=0; i<N; i++){
+    
+    vector<Type> eta_row = eta.row(i);
+    vector<Type> dfcost_row = dfcost.row(i);
+    Type rep = replicates(i);
+    //Type weight1 = weight(i);
+    
+    jnll -= lla(eta_row,dfcost_row,rep);
+  } 
+  return jnll;
+}
+
+
