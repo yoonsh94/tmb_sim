@@ -1,0 +1,101 @@
+#include <TMB.hpp>
+
+
+ 
+// Likelihood for the amount of +ve medical cost
+
+ template <class Type>
+ Type llb(vector<Type> mu_row, Type sigma_exp, vector<Type> dfcost_row,Type rep,Type costindexsum1,Type costsum1)
+ { Type lik_b = 0;
+ 
+ if (costindexsum1 == 0) {
+ lik_b = 0;
+ }
+ 
+ if (costindexsum1 > 0) {
+ Type lik_b1 = 0;
+
+ for(int i=0; i<rep; i++){
+ if (dfcost_row(i) > 0){
+ 
+ lik_b1 += dgamma(dfcost_row(i),sigma_exp, mu_row(i)/sigma_exp,TRUE);
+
+ }
+ }
+ lik_b = lik_b1;}
+ return lik_b;
+ } 
+ 
+
+// Joint likelihood  
+template<class Type>
+Type objective_function<Type>::operator() ()
+{ 
+  
+  /* Data */
+  DATA_MATRIX(Xrow);
+  DATA_VECTOR(a1);
+  DATA_INTEGER(N);
+  DATA_VECTOR(replicates);
+  DATA_MATRIX(dfcost);
+  DATA_VECTOR(costindexsum);
+  DATA_VECTOR(costsum);
+  DATA_INTEGER(maxrep);
+  //DATA_VECTOR(weight);
+  /* Parameters */
+  
+  PARAMETER_VECTOR(b1); 
+  PARAMETER(logsigma_b);
+  PARAMETER(beta0);
+  PARAMETER(beta1);
+  PARAMETER(lambda1);
+  PARAMETER(delta);
+ 
+  /* Joint likelihood */
+  
+  
+  
+  
+  Type jnll = Type(0.0);
+  
+  jnll -= sum(dnorm(b1, Type(0), exp(logsigma_b), true));
+  
+  
+   
+   matrix<Type> mu(N,maxrep);
+   Type sigma = delta;
+   Type sigma_exp = exp(sigma); 
+   
+   
+   
+   
+   for(int i=0; i<N; i++){
+   Type rep = replicates(i);
+   for(int j=0; j<rep; j++){
+   mu(i,j) = 1 / (beta0 + Xrow(i,j)*beta1 + a1(i)*lambda1 + b1(i));
+   
+   }
+   
+   }  
+   
+  
+
+  //the joint negative log-likelihood
+  for(int i=0; i<N; i++){
+    
+
+    vector<Type> dfcost_row = dfcost.row(i);
+    Type rep = replicates(i);
+    vector<Type> mu_row = mu.row(i);
+    Type costindexsum1 = costindexsum(i);
+    Type costsum1 = costsum(i);
+    //Type weight1 = weight(i);
+    
+    jnll -= llb(mu_row,sigma_exp,dfcost_row,rep,costindexsum1,costsum1);  
+  } 
+  return jnll;
+}
+
+
+
+
