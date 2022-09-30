@@ -1,0 +1,196 @@
+library(pacman)
+pacman::p_load(tidyverse,magrittr,flexsurv,dplyr,tidyr,tidyverse,data.table,plyr,TMB,lme4)
+
+# Set seed
+set.seed(3410578)
+# Number of subjects
+N <- 500
+
+# Unconditional true parameters  
+alpha0.true <- -4
+alpha1.true <- alpha1 <- 1
+beta0.true <- 10
+beta1.true <- 4
+gamma.true <- 1.5
+lambda1.true <- 0.7 
+lambda2.true <- 0.5
+lambda3.true <- 0.5
+delta.true <- 0.5
+sigmaA.true <- 1 
+sigmaB.true <- 1
+
+
+# Replicates - These can be used to create repeated measures
+mean.repl <- 10 
+replicates <- rpois(N,mean.repl)+1
+idK <- sort(rep(1:N, replicates))
+
+Ntotal <-   sum(replicates)
+
+
+X0 <- rbinom(Ntotal, 1, 0.5) #cluster level
+X <- X0 
+Z0 <- rbinom(N, 1, 0.5) 
+Z <- Z0[idK] #longtiduinal Z
+
+
+# Random effects
+a<-rnorm(N,0,sigmaA.true)
+b<-rnorm(N,0,sigmaB.true)
+a_All <- a[idK]
+b_All <- b[idK]
+
+
+# Conditional true parameters   
+eta.true <- alpha0.true+alpha1.true*X+a_All
+mu.true <-1/(beta0.true + beta1.true*X + lambda1.true*a_All + b_All)
+sigmaiij2.true <- exp(delta.true)
+
+
+# Prepare a data frame with identifiers and covariates
+
+df <- data.frame(Identifier=idK,X= X, Z=Z)  
+df$YNoZero  <-  rbinom(Ntotal, 1, 1/(1+exp(-eta.true)))
+df$cost <- rgamma(Ntotal,shape=sigmaiij2.true, scale=mu.true/sigmaiij2.true)
+df <- df %>% mutate(cost2 =  cost*YNoZero )
+#df <- df %>% mutate(cost2 =  cost) 
+df$X <-X
+
+
+fit.a<- glmer(   YNoZero    ~ X+  (1|idK), data=df , binomial)
+
+est_a<- unlist(ranef(fit.a)) #estimated a's
+
+fit.b<-glmer(cost~X+est_a[idK] + (1|idK), data=df , Gamma) #fitting cost sub-model using estimated a's
+
+est_b<-unlist(ranef(fit.b))
+
+coxph(Surv(survt1,di1)~Z0 + est_a + est_b)
+
+
+
+#new survival time code 
+
+l0 <- 2  # hazard is assumed to be exponential 
+U2     <-   runif(N, 0,1)[idK]
+idKu  <- unique(idK)
+survt0 <-survt <- (-log(U2)/(l0*exp(Z*gamma.true+lambda2.true*a_All+lambda3.true*b_All)))
+
+# censoring times:
+survt.censor <- rexp(N, rate= 2)[idK]
+# censoring:
+di    <- as.numeric(survt0 <= survt.censor);
+survt <- pmin(survt0, survt.censor)  #survt is the minimum of survival time and censoring time
+df$survt <- survt
+df$di <- di
+
+#df$cost  <- df$cost* df$di
+
+df$X <- X
+df$Z <- Z
+
+df$a <- a_All
+df$b <- b_All
+df$idK <- idK
+df$num <- unlist(sapply(1:N, function(v) 1:replicates[v]))
+
+dfS <- df[!duplicated(df$idK, fromLast = TRUE),]
+
+survt1<-dfS$survt #one survt per indiv
+di1 <- dfS$di
+replicates <- dfS$num
+qq <-10
+Q.partition <- c(0,quantile(survt1,1:qq/qq))
+
+
+# change the format of data  (long to wide)
+
+list1<-list()
+for(i in 1:N){
+  list1[[i]]<-1:replicates[i]
+}
+numbers<-unlist(list1)
+
+setDT(df)
+#df.wide <- dcast(df, Identifier~numbers, value.var = c("cost2","X","Z","survt","di","a","b"))
+df.wide <- dcast(df, Identifier~numbers, value.var = c("cost2","X","Z","a","b"))
+df.wide$replicates <- replicates
+
+maxrep<-max(replicates)+1
+dfcost<-as.matrix(df.wide[,2:maxrep]) #cost data matrix
+
+## This was incorrect- numbers were off
+ncoldf <-ncol(df.wide)
+nXcol <- (1:ncoldf)[colnames(df.wide) %in% paste('X', 1:maxrep, sep='_')]
+X.row<-as.matrix(df.wide[,nXcol , with = FALSE]) #X data  matrix
+
+#dfcost <- dfcost[as.numeric(names(replicates)),]  no longer required to subset
+
+#sum of repeated costs & indicator variable 
+costindsum<-list()
+costsum<-list()
+for(i in 1:N){
+  costindsum[[i]] <- sum(dfcost[i,][1:replicates[i]] > 0)
+  costsum[[i]] <- sum(dfcost[i,][1:replicates[i]] )
+}
+costindexsum<-unlist(costindsum)
+costsum<-unlist(costsum)
+
+
+#cpp script compilation
+#compile("autodiffr_laplace.cpp",framework="TMBad")
+#dyn.load(dynlib("autodiffr_laplace"))
+
+compile("autodiffr_a.cpp")
+dyn.load(dynlib("autodiffr_a"))
+
+compile("autodiffr_b.cpp")
+dyn.load(dynlib("autodiffr_b"))
+
+compile("autodiffr_c.cpp")
+dyn.load(dynlib("autodiffr_c"))
+
+#model A
+
+data <- list(Xrow=X.row,N=N, replicates= replicates, dfcost=dfcost,maxrep=maxrep_tmb) 
+parameters <- list(a1=rep(0,N),logsigma_a=0, alpha0=1, alpha1=1)
+
+obj <- MakeADFun(data,parameters,random=c("a1"),DLL="autodiffr_a")
+obj$hessian <- TRUE
+opt<-do.call("optim",obj)
+opt$par
+#save the parameter estimates
+a_cpp<-obj$env$parList(opt$par)$a1
+
+
+#model B
+
+data <- list(Xrow=X.row,a1 = a_cpp, N=N, replicates= replicates, dfcost=dfcost, costindexsum=costindexsum, costsum=costsum,maxrep=maxrep_tmb) #a's are given
+
+parameters <- list(b1=rep(0,N),logsigma_b=0, beta0=1, beta1=1, lambda1=1,delta=1)
+
+obj <- MakeADFun(data,parameters,random=c("b1"),DLL="autodiffr_b")
+obj$hessian <- TRUE
+opt<-do.call("optim",obj)
+opt$par
+b_cpp<-obj$env$parList(opt$par)$b1
+
+
+# model C
+index_vec<-sapply(1:N, function(v) min((1:length(Q.partition)-2)[survt1[v]<=Q.partition]))
+#(1:length(Q.partition))[survt1[1]<=Q.partition]
+
+cumhaz_int <- c(Q.partition[2],(Q.partition[3:(qq+1)]-Q.partition[(2):(qq)]))
+
+maxrep_tmb <- max(replicates)
+
+data <- list(Xrow=X.row, Z0=Z0, N=N, Qpartition = Q.partition, replicates= replicates, dfcost=dfcost, survt1=survt1, di1=di1, costindexsum=costindexsum, costsum=costsum,cumhaz_int=cumhaz_int,index_vec=index_vec,maxrep=maxrep_tmb)
+
+
+data <- list(a1=a_cpp, b1 = b_cpp, Z0=Z0, N=N, Qpartition = Q.partition, survt1=survt1, di1=di1, cumhaz_int=cumhaz_int,index_vec=index_vec)
+
+parameters <- list(gamma=1,lambda2=1,lambda3=1,h1=1,h2=1,h3=1,h4=1,h5=1,h6=1,h7=1,h8=1,h9=1,h10=1)
+obj <- MakeADFun(data,parameters,DLL="autodiffr_c")
+obj$hessian <- TRUE
+opt<-do.call("optim",obj)
+opt$par
