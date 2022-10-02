@@ -1,0 +1,104 @@
+#include <TMB.hpp>
+
+/*
+template <class Type>
+Type lla(vector<Type> eta_row, vector<Type> dfcost_row, Type rep){
+  
+  vector<Type> pi_i = exp(eta_row)/(1+exp(eta_row));
+  Type l_a = 0; 
+  for(int h=0; h<rep; h++){
+    if(dfcost_row(h) > 0){
+      l_a -= log(pi_i(h));
+    }
+    if(dfcost_row(h) == 0){
+      l_a -= log(1-pi_i(h));
+      //l_a += 1;
+    }
+  }
+  return l_a;
+}  
+*/
+
+
+typedef TMBad::ad_aug ad;
+struct model {
+  vector<ad> X_row;
+  vector<ad> dfcost_row; // Data
+  ad N, rep, alpha0, alpha1,  logsigma_a;
+  
+  ad operator()(vector<ad> a1) {
+   //type individual likelihood here
+  
+   vector<ad> eta_row = alpha0 + alpha1*X_row + a1(0);
+  
+    ad nll = -dnorm(a1(0),ad(0),exp(logsigma_a), true); 
+    vector<ad> pi_i = exp(eta_row)/(1+exp(eta_row));
+    //ad l_a = 0; 
+    for(int h=0; h<rep; h++){
+      if(dfcost_row(h) > 0){
+        nll -= log(pi_i(h));
+      }
+      if(dfcost_row(h) == 0){
+        nll -= log(1-pi_i(h)); //this is problematic but why???
+      }
+    }
+    //nll = lla(eta_row,dfcost_row,rep); 
+    return nll;
+  }
+  template<class Type>
+  Type eval_nldens(vector<Type> &start) {
+    //vector<Type> start(1); //start.setZero();
+    newton::newton_config cfg;
+    //cfg.trace=true;
+    Type res = newton::Laplace(*this, start, cfg);
+    return res;
+  }
+};
+
+
+
+// Joint likelihood  
+template<class Type>
+Type objective_function<Type>::operator() ()
+{ 
+  
+  /* Data */
+  DATA_MATRIX(Xrow);
+  DATA_INTEGER(N);
+  DATA_VECTOR(replicates); 
+  DATA_MATRIX(dfcost);
+  
+  DATA_VECTOR(a1); //randeff initial guess
+  
+  /* Parameters */   
+  PARAMETER(logsigma_a);
+  PARAMETER(alpha0);
+  PARAMETER(alpha1);
+
+  
+  /* Joint likelihood */
+  
+  
+  
+  
+  Type nll = 0;
+
+  //R.E initial guess
+  //vector<Type> a1(N);
+  //a1.setZero();
+  
+  //the joint negative log-likelihood
+  for(int i=0; i<N; i++){
+    
+    vector<Type> X_row = Xrow.row(i);
+    
+    //vector<Type> eta_row = eta.row(i);
+    vector<Type> dfcost_row = dfcost.row(i);
+    Type rep = replicates(i);
+
+    model obj = {X_row, dfcost_row, N, rep, alpha0, alpha1, logsigma_a}; // put data vectors here
+    //nll += obj.eval_nldens<Type>();
+    nll += obj.eval_nldens<Type>(a1);
+    }
+  return nll;
+}
