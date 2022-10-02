@@ -39,7 +39,7 @@ struct model {
         nll -= log(pi_i(h));
       }
       if(dfcost_row(h) == 0){
-        nll -= log(1-pi_i(h)); //this is problematic but why???
+        nll -= log(1-pi_i(h)); //this is problematic 
       }
     }
     //nll = lla(eta_row,dfcost_row,rep); 
