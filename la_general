@@ -83,6 +83,8 @@ Type objective_function<Type>::operator() ()
   
   DATA_VECTOR(a1); //randeff initial guess
   DATA_VECTOR(start);
+  DATA_VECTOR(weights);
+  
   /* Parameters */   
   //PARAMETER(logsigma_a);
   //PARAMETER(alpha0);
@@ -119,13 +121,12 @@ Type objective_function<Type>::operator() ()
     vector<Type> dfcost_row = dfcost.row(i);
     Type rep = replicates(i);
     Type st1 = start(i);
-    
-
+    Type w = weights(i);
     
  
     model obj = {Xrow, dfcost_row, N, rep, st1, sigma}; // put data vectors here
     //nll += obj.eval_nldens<Type>();
-    nll += obj.eval_nldens<Type>(a1);
+    nll += w * obj.eval_nldens<Type>(a1);
     a2(i) = a1(0);
     model_evaluator F = {obj};
     g.row(i) = autodiff::gradient(F, sigma);
