@@ -102,14 +102,11 @@ Type objective_function<Type>::operator() ()
   DATA_VECTOR(costindexsum);
   DATA_VECTOR(costsum);
   DATA_VECTOR(start);
-
-  //DATA_INTEGER(maxrep);
-  //DATA_VECTOR(weight);
+  DATA_VECTOR(weight);
   /* Parameters */
   
 
   //PARAMETER_VECTOR(b1); 
-
   //PARAMETER(logsigma_b);
   //PARAMETER(delta);
   //PARAMETER(beta0);
@@ -137,10 +134,10 @@ Type objective_function<Type>::operator() ()
     Type costsum1 = costsum(i);
     Type a_1 = a1(i);
     Type st1 = start(i);
-    //Type weight1 = weight(i);
+    Type w = weight(i);
     model obj = {Xrow, dfcost_row, a_1, N, rep,costindexsum1,costsum1, st1,sigma};
 
-    nll += obj.eval_nldens<Type>(b1);
+    nll += w * obj.eval_nldens<Type>(b1);
     
     b2(i) = b1(0);
     model_evaluator F = {obj};
