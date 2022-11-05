@@ -32,7 +32,7 @@ struct model {
       repind = repind + 1;
     }
 
-    vector<ad> mu_row = 1/ (Xrow1 * beta + lambda1*a_1 + b1(0)); // returns mu with length rep
+    vector<ad> mu_row = exp(Xrow1 * beta + lambda1*a_1 + b1(0)); // returns mu with length rep
     //ad sigma1 = delta;
     ad sigma_exp = exp(delta); 
     
